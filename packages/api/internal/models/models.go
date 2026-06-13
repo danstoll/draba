@@ -58,15 +58,23 @@ type TeamMemberWithUser struct {
 // ArchivedAt is non-nil when the account is inactivated; login is rejected
 // for archived users. Color and Icon are user-level identity fields (migration
 // 010); they propagate to team_members rows for the user when changed.
+//
+// AuthProvider, OIDCIssuer, and OIDCSubject are added in migration 024. A
+// local user has AuthProvider "local" and a non-nil PasswordHash. An OIDC
+// (SSO) user has AuthProvider "oidc", a nil PasswordHash, and a non-nil
+// (OIDCIssuer, OIDCSubject) pair identifying them at the external IdP.
 type User struct {
 	ID           string     `db:"id"             json:"id"`
 	Email        string     `db:"email"          json:"email"`
-	PasswordHash string     `db:"password_hash"  json:"-"`
+	PasswordHash *string    `db:"password_hash"  json:"-"`
 	DisplayName  string     `db:"display_name"   json:"displayName"`
 	AvatarURL    *string    `db:"avatar_url"     json:"avatarUrl,omitempty"`
 	Color        *string    `db:"color"          json:"color,omitempty"`
 	Icon         *string    `db:"icon"           json:"icon,omitempty"`
 	IsSuperadmin bool       `db:"is_superadmin"  json:"isSuperadmin"`
+	AuthProvider string     `db:"auth_provider"  json:"authProvider"`
+	OIDCIssuer   *string    `db:"oidc_issuer"    json:"-"`
+	OIDCSubject  *string    `db:"oidc_subject"   json:"-"`
 	CreatedAt    time.Time  `db:"created_at"     json:"createdAt"`
 	UpdatedAt    time.Time  `db:"updated_at"     json:"updatedAt"`
 	ArchivedAt   *time.Time `db:"archived_at"    json:"archivedAt,omitempty"`

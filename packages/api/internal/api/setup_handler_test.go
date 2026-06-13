@@ -39,11 +39,13 @@ func TestSetupStatus_NoSetupNeeded(t *testing.T) {
 	require.NoError(t, db.Migrate(database))
 
 	usersRepo := db.NewUserRepo(database)
+	adminHash := "x"
 	require.NoError(t, usersRepo.Create(&models.User{
 		ID:           "u1",
 		Email:        "admin@example.com",
-		PasswordHash: "x",
+		PasswordHash: &adminHash,
 		DisplayName:  "Admin",
+		AuthProvider: "local",
 		IsSuperadmin: true,
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),

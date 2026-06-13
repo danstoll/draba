@@ -12,6 +12,7 @@ import SettingsPage from '@/pages/SettingsPage'
 import ForgotPasswordPage from '@/pages/ForgotPasswordPage'
 import ResetPasswordPage from '@/pages/ResetPasswordPage'
 import ShareViewPage from '@/pages/ShareViewPage'
+import OIDCCallbackPage from '@/pages/OIDCCallbackPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -39,6 +40,8 @@ export default function App() {
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/reset-password" element={<ResetPasswordPage />} />
+            {/* SSO landing — receives tokens in the URL fragment after OIDC login */}
+            <Route path="/auth/callback" element={<OIDCCallbackPage />} />
             {/* Public share viewer — no auth required */}
             <Route path="/s/:token" element={<ShareViewPage />} />
 

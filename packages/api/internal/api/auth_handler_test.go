@@ -263,12 +263,14 @@ func TestRegister_TierUserLimitReached(t *testing.T) {
 	require.NoError(t, db.Migrate(database))
 
 	users := db.NewUserRepo(database)
+	seedHash := "x"
 	for i := range 5 {
 		require.NoError(t, users.Create(&models.User{
 			ID:           fmt.Sprintf("user-%d", i),
 			Email:        fmt.Sprintf("seed%d@example.com", i),
-			PasswordHash: "x",
+			PasswordHash: &seedHash,
 			DisplayName:  fmt.Sprintf("Seed %d", i),
+			AuthProvider: "local",
 			CreatedAt:    time.Now(),
 			UpdatedAt:    time.Now(),
 		}))

@@ -89,8 +89,9 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	user := &models.User{
 		ID:           newID(),
 		Email:        string(req.Email),
-		PasswordHash: hash,
+		PasswordHash: &hash,
 		DisplayName:  req.DisplayName,
+		AuthProvider: "local",
 		IsSuperadmin: count == 0,
 		CreatedAt:    now,
 		UpdatedAt:    now,
@@ -180,7 +181,16 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := auth.CheckPassword(user.PasswordHash, req.Password); err != nil {
+	// An OIDC (SSO) account has no password and must never authenticate via
+	// this endpoint — it can only log in through the OIDC flow. Same generic
+	// error as a bad password so the endpoint cannot reveal that an address
+	// belongs to an SSO account.
+	if user.PasswordHash == nil {
+		writeError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid email or password")
+		return
+	}
+
+	if err := auth.CheckPassword(*user.PasswordHash, req.Password); err != nil {
 		writeError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid email or password")
 		return
 	}

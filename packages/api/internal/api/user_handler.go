@@ -103,8 +103,15 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// An OIDC (SSO) account has no local password to change; password
+	// management lives at the identity provider.
+	if user.PasswordHash == nil {
+		writeError(w, http.StatusBadRequest, "OIDC_ACCOUNT", "this account signs in via SSO and has no password to change")
+		return
+	}
+
 	// Verify the current password before allowing the change.
-	if err := auth.CheckPassword(user.PasswordHash, body.CurrentPassword); err != nil {
+	if err := auth.CheckPassword(*user.PasswordHash, body.CurrentPassword); err != nil {
 		writeError(w, http.StatusUnauthorized, "WRONG_PASSWORD", "current password is incorrect")
 		return
 	}

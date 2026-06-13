@@ -44,6 +44,55 @@ func (r *UserRepo) GetByEmail(email string) (*models.User, error) {
 	return &u, nil
 }
 
+// GetByOIDCSubject looks up a user by their external identity — the
+// (issuer, subject) pair from the IdP. This is the stable key for an SSO
+// account: email or display name may change at the IdP, but the subject does
+// not. Returns sql.ErrNoRows (wrapped) when no row matches.
+func (r *UserRepo) GetByOIDCSubject(issuer, subject string) (*models.User, error) {
+	var u models.User
+	err := r.db.Get(&u,
+		`SELECT * FROM users WHERE oidc_issuer = ? AND oidc_subject = ?`,
+		issuer, subject,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("getting user by oidc subject: %w", err)
+	}
+	return &u, nil
+}
+
+// CreateOIDC inserts a new SSO user. The account has no password; identity is
+// the (issuer, subject) pair. The row-level CHECK added in migration 024
+// rejects an oidc account missing either field, so a malformed insert fails at
+// the database rather than producing a half-formed account.
+func (r *UserRepo) CreateOIDC(u *models.User) error {
+	u.AuthProvider = "oidc"
+	u.PasswordHash = nil
+	_, err := r.db.NamedExec(`
+		INSERT INTO users (id, email, display_name, avatar_url, is_superadmin,
+		                   auth_provider, oidc_issuer, oidc_subject, created_at, updated_at)
+		VALUES (:id, :email, :display_name, :avatar_url, :is_superadmin,
+		        :auth_provider, :oidc_issuer, :oidc_subject, :created_at, :updated_at)
+	`, u)
+	if err != nil {
+		return fmt.Errorf("creating oidc user: %w", err)
+	}
+	return nil
+}
+
+// UpdateOIDCProfile refreshes the email and display name of an existing SSO
+// user from their latest IdP claims, so a name/email change upstream is
+// reflected on next login. The (issuer, subject) identity is never changed.
+func (r *UserRepo) UpdateOIDCProfile(id, email, displayName string) error {
+	_, err := r.db.Exec(
+		`UPDATE users SET email = ?, display_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		email, displayName, id,
+	)
+	if err != nil {
+		return fmt.Errorf("updating oidc profile: %w", err)
+	}
+	return nil
+}
+
 // GetByID looks up a user by primary key.
 func (r *UserRepo) GetByID(id string) (*models.User, error) {
 	var u models.User

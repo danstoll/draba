@@ -11,6 +11,9 @@ import { apiFetch } from '@/lib/api'
 interface PublicBranding {
   instanceName: string
   accentColor: string
+  /** True when the instance has SSO (OIDC) configured. Drives the login-page
+   *  "Sign in with SSO" button. */
+  ssoEnabled: boolean
 }
 
 export function usePublicSettings() {

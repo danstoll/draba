@@ -229,6 +229,10 @@ func (s *Server) handleGetPublicBranding(w http.ResponseWriter, _ *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"instanceName": name,
 		"accentColor":  accent,
+		// ssoEnabled lets the login page decide whether to show the "Sign in
+		// with SSO" button. It is not sensitive — the same fact is observable
+		// by probing /auth/oidc/login.
+		"ssoEnabled": s.oidcEnabled(),
 	})
 }
 

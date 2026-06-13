@@ -61,6 +61,13 @@ type Server struct {
 	bus            *events.Bus
 	hub            *ws.Hub
 	uiFS           fs.FS
+	// oidc is non-nil only when SSO is configured (DRABA_OIDC_ISSUER set).
+	// When nil, the /auth/oidc/* routes report SSO as disabled and no external
+	// identity provider is ever contacted. Set via WithOIDC.
+	oidc *auth.OIDCService
+	// oidcAutoCreateUsers controls whether an unknown external identity is
+	// auto-provisioned a local account on first SSO login.
+	oidcAutoCreateUsers bool
 }
 
 // NewServer constructs a Server with its required dependencies. It does not
@@ -121,6 +128,19 @@ func (s *Server) WithUI(uiFS fs.FS) *Server {
 	return s
 }
 
+// WithOIDC enables SSO. Passing a nil service leaves SSO disabled (the zero
+// value), so callers can wire it unconditionally from a possibly-nil
+// constructor result. autoCreate controls first-login auto-provisioning.
+func (s *Server) WithOIDC(svc *auth.OIDCService, autoCreate bool) *Server {
+	s.oidc = svc
+	s.oidcAutoCreateUsers = autoCreate
+	return s
+}
+
+// oidcAutoCreate reports whether unknown external identities are provisioned a
+// local account on first SSO login.
+func (s *Server) oidcAutoCreate() bool { return s.oidcAutoCreateUsers }
+
 // Routes returns the fully-wired HTTP handler for the API, including all
 // core routes plus any routes added by registered tier modules.
 func (s *Server) Routes() http.Handler {
@@ -135,6 +155,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /auth/me", chain(s.handleMe, s.authMiddleware))
 	mux.HandleFunc("POST /auth/forgot-password", s.handleForgotPassword)
 	mux.HandleFunc("POST /auth/reset-password", s.handleResetPassword)
+	// OIDC / SSO. Public (no auth): they start and complete the external login
+	// flow. Both report SSO disabled with 404 when DRABA_OIDC_ISSUER is unset.
+	mux.HandleFunc("GET /auth/oidc/login", s.handleOIDCLogin)
+	mux.HandleFunc("GET /auth/oidc/callback", s.handleOIDCCallback)
 
 	mux.HandleFunc("GET /users/me/preferences", chain(s.handleGetPreferences, s.authMiddleware))
 	mux.HandleFunc("PUT /users/me/preferences", chain(s.handleUpsertPreference, s.authMiddleware))
