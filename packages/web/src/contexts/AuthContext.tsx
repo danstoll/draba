@@ -41,6 +41,10 @@ interface AuthContextValue extends AuthState {
   /** Registers a new account and returns the fresh access token directly,
    *  avoiding a race against the async setState that follows. */
   register: (email: string, password: string, displayName: string, inviteToken?: string) => Promise<string>
+  /** Establishes a session directly from tokens obtained out-of-band (e.g. the
+   *  OIDC callback's URL fragment), persisting the refresh token and loading
+   *  the user. Avoids a full-page reload that would race the mount restore. */
+  loginWithTokens: (accessToken: string, refreshToken: string) => Promise<void>
   logout: () => void
   /** Merges fields into the current user object — used after profile updates. */
   patchUser: (patch: Partial<User>) => void
@@ -133,6 +137,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [],
   )
 
+  const loginWithTokens = useCallback(async (accessToken: string, refreshToken: string) => {
+    storeRefreshToken(refreshToken)
+    // Load the user with the access token we already hold; tolerate failure
+    // (the token is still valid) the same way the mount restore does.
+    let user: User | null = null
+    try {
+      const res = await fetch(`${API_BASE}/auth/me`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      if (res.ok) user = (await res.json()) as User
+    } catch {
+      // keep user null; session still works via the access token
+    }
+    setState({ user, accessToken, initializing: false })
+  }, [])
+
   const logout = useCallback(() => {
     clearStoredRefreshToken()
     setState({ user: null, accessToken: null, initializing: false })
@@ -169,8 +189,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const value = useMemo<AuthContextValue>(
-    () => ({ ...state, getAccessToken, login, register, logout, patchUser }),
-    [state, getAccessToken, login, register, logout, patchUser],
+    () => ({ ...state, getAccessToken, login, register, loginWithTokens, logout, patchUser }),
+    [state, getAccessToken, login, register, loginWithTokens, logout, patchUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

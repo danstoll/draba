@@ -4,30 +4,46 @@
  * The API's /auth/oidc/callback redirects here with the freshly issued tokens
  * in the URL fragment (#access_token=…&refresh_token=…). The fragment is used
  * rather than the query string so the tokens are never sent to a server or
- * written to an access log. We persist the refresh token and hand off to "/",
- * where AuthProvider's mount effect exchanges it for a session — reusing the
- * exact same restore path as a normal page load.
+ * written to an access log.
+ *
+ * We hand the tokens straight to the auth context and navigate via the router.
+ * We deliberately do NOT do a full-page reload: a hard navigation aborts the
+ * in-flight session-restore request (surfacing as "TypeError: Failed to fetch")
+ * and races the AuthProvider mount, which previously bounced the user back to
+ * the login page even though SSO had succeeded.
  */
 
-import { useEffect } from 'react'
-import { storeRefreshToken } from '@/lib/api'
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useAuth } from '@/contexts/AuthContext'
 
 export default function OIDCCallbackPage() {
-  useEffect(() => {
-    // location.hash looks like "#access_token=...&refresh_token=..."
-    const params = new URLSearchParams(window.location.hash.replace(/^#/, ''))
-    const refresh = params.get('refresh_token')
+  const { loginWithTokens } = useAuth()
+  const navigate = useNavigate()
+  const [error, setError] = useState<string | null>(null)
+  // Guard against React StrictMode double-invocation consuming the hash twice.
+  const ran = useRef(false)
 
-    if (!refresh) {
-      window.location.replace('/login?sso_error=missing_tokens')
+  useEffect(() => {
+    if (ran.current) return
+    ran.current = true
+
+    const params = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+    const accessToken = params.get('access_token')
+    const refreshToken = params.get('refresh_token')
+
+    if (!accessToken || !refreshToken) {
+      navigate('/login?sso_error=missing_tokens', { replace: true })
       return
     }
 
-    storeRefreshToken(refresh)
-    // Strip the tokens from the address bar, then let AuthProvider restore the
-    // session from the stored refresh token on the next load.
-    window.location.replace('/')
-  }, [])
+    // Clear the tokens from the address bar immediately.
+    window.history.replaceState(null, '', '/auth/callback')
+
+    loginWithTokens(accessToken, refreshToken)
+      .then(() => navigate('/', { replace: true }))
+      .catch((e) => setError((e as Error).message || 'Sign-in failed'))
+  }, [loginWithTokens, navigate])
 
   return (
     <div
@@ -41,7 +57,7 @@ export default function OIDCCallbackPage() {
         fontSize: 14,
       }}
     >
-      Signing you in…
+      {error ? `Sign-in failed: ${error}` : 'Signing you in…'}
     </div>
   )
 }
