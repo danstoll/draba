@@ -65,10 +65,38 @@ func Migrate(database *sqlx.DB) error {
 			return fmt.Errorf("applying migration %s: %w", m.name, err)
 		}
 
+		// A migration that rebuilds a referenced table (drop + recreate) can
+		// orphan foreign keys if it gets the row copy wrong. PRAGMA
+		// foreign_key_check returns one row per violation; treat any as a
+		// failed migration rather than silently leaving a corrupt schema.
+		if err := checkForeignKeys(database, m.name); err != nil {
+			return err
+		}
+
 		if _, err := database.Exec(`INSERT INTO schema_migrations (version) VALUES (?)`, m.version); err != nil {
 			return fmt.Errorf("recording migration %d: %w", m.version, err)
 		}
 	}
 
+	return nil
+}
+
+// checkForeignKeys runs PRAGMA foreign_key_check and returns an error naming
+// the migration if any foreign key is left orphaned. Each result row is a
+// violation (table, rowid, referenced table, fk index); a non-empty result
+// means the schema is inconsistent.
+func checkForeignKeys(database *sqlx.DB, migration string) error {
+	rows, err := database.Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		return fmt.Errorf("foreign_key_check after %s: %w", migration, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	if rows.Next() {
+		return fmt.Errorf("migration %s left orphaned foreign keys (foreign_key_check returned violations)", migration)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("foreign_key_check after %s: %w", migration, err)
+	}
 	return nil
 }

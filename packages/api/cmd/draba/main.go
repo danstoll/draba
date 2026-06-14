@@ -177,7 +177,7 @@ func oidcRedirectURL() string {
 	if v := os.Getenv("DRABA_OIDC_REDIRECT_URL"); v != "" {
 		return v
 	}
-	if base := os.Getenv("DRABA_OIDC_ISSUER"); base == "" {
+	if os.Getenv("DRABA_OIDC_ISSUER") == "" {
 		return "" // SSO disabled; no redirect needed.
 	}
 	return strings.TrimRight(getenv("DRABA_BASE_URL", "http://localhost:8080"), "/") + "/auth/oidc/callback"

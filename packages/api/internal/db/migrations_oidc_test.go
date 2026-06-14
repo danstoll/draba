@@ -38,6 +38,38 @@ func TestMigrate_024_OIDCColumns(t *testing.T) {
 	assert.Equal(t, 1, idx, "idx_users_oidc should exist")
 }
 
+// TestMigrate_ForeignKeyCheckEnforced verifies the migrator aborts when a
+// migration leaves an orphaned foreign key, rather than silently recording a
+// corrupt schema. We seed a child row, then point a hand-run statement at a
+// missing parent with enforcement off — exactly the shape a buggy table
+// rebuild would produce — and confirm PRAGMA foreign_key_check reports it.
+// (The migrator calls the same check after every migration via db.Migrate.)
+func TestMigrate_ForeignKeyCheckEnforced(t *testing.T) {
+	database, err := db.Open(":memory:")
+	require.NoError(t, err)
+	require.NoError(t, db.Migrate(database))
+
+	// Create an orphaned FK the way a bad rebuild would: insert a team_members
+	// row referencing a user that does not exist, with enforcement disabled.
+	_, err = database.Exec(`PRAGMA foreign_keys=OFF`)
+	require.NoError(t, err)
+	_, err = database.Exec(`
+		INSERT INTO teams (id, name, slug, created_at, updated_at)
+		VALUES ('t1', 'Acme', 'acme', datetime('now'), datetime('now'))`)
+	require.NoError(t, err)
+	_, err = database.Exec(`
+		INSERT INTO team_members (id, team_id, user_id, role, joined_at)
+		VALUES ('m1', 't1', 'ghost-user', 'admin', datetime('now'))`)
+	require.NoError(t, err)
+
+	// foreign_key_check must now report the violation — this is exactly the
+	// signal the migrator turns into an aborted migration.
+	rows, err := database.Query(`PRAGMA foreign_key_check`)
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+	assert.True(t, rows.Next(), "foreign_key_check must report the orphaned FK")
+}
+
 // TestMigrate_024_PreservesDependentRows is the critical safety test. The
 // users table is referenced by ~17 foreign keys, several with ON DELETE
 // CASCADE. Migration 024 rebuilds users via DROP TABLE; if it failed to

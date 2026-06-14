@@ -128,6 +128,13 @@ function Spinner() {
   )
 }
 
+// setSSOHighlight toggles the SSO button's hover/focus highlight. Shared by the
+// mouse and keyboard handlers so both input methods get the same affordance.
+function setSSOHighlight(el: HTMLButtonElement, on: boolean) {
+  el.style.borderColor = on ? '#288C9B' : 'hsl(210 15% 24%)'
+  el.style.background = on ? 'hsl(210 15% 19%)' : 'hsl(210 15% 17%)'
+}
+
 // ── Main page ────────────────────────────────────────────────────────────────
 
 export default function LoginPage() {
@@ -428,8 +435,12 @@ export default function LoginPage() {
                       fontFamily: 'inherit',
                       transition: 'border-color 160ms ease, background 160ms ease',
                     }}
-                    onMouseEnter={e => { e.currentTarget.style.borderColor = '#288C9B'; e.currentTarget.style.background = 'hsl(210 15% 19%)' }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'hsl(210 15% 24%)'; e.currentTarget.style.background = 'hsl(210 15% 17%)' }}
+                    // Hover AND focus both apply the highlight so keyboard users
+                    // get the same affordance as mouse users.
+                    onMouseEnter={e => setSSOHighlight(e.currentTarget, true)}
+                    onMouseLeave={e => setSSOHighlight(e.currentTarget, false)}
+                    onFocus={e => setSSOHighlight(e.currentTarget, true)}
+                    onBlur={e => setSSOHighlight(e.currentTarget, false)}
                   >
                     Sign in with SSO
                   </button>

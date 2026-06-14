@@ -3,7 +3,9 @@ package api
 import (
 	"database/sql"
 	"errors"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -72,9 +74,10 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		s.clearFlowCookie(w, oidcPKCECookie, secure)
 	}()
 
-	// If the IdP reported an error, surface it to the login page.
-	if e := r.URL.Query().Get("error"); e != "" {
-		s.redirectSSOError(w, r, e)
+	// If the IdP reported an error, surface a fixed reason — never the raw
+	// IdP-supplied value, which is attacker-influenceable.
+	if r.URL.Query().Get("error") != "" {
+		s.redirectSSOError(w, r, "idp_error")
 		return
 	}
 
@@ -115,6 +118,8 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 			s.redirectSSOError(w, r, "provisioning_disabled")
 		case errors.Is(err, errOIDCUserLimit):
 			s.redirectSSOError(w, r, "user_limit")
+		case errors.Is(err, errOIDCNoEmail):
+			s.redirectSSOError(w, r, "no_email")
 		default:
 			s.redirectSSOError(w, r, "login_failed")
 		}
@@ -150,6 +155,7 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 var (
 	errOIDCProvisioningClosed = errors.New("oidc auto-provisioning disabled")
 	errOIDCUserLimit          = errors.New("user limit reached")
+	errOIDCNoEmail            = errors.New("oidc id_token has no email claim")
 )
 
 // findOrProvisionOIDCUser returns the local user for the given external
@@ -163,12 +169,15 @@ func (s *Server) findOrProvisionOIDCUser(claims *auth.OIDCClaims) (*models.User,
 	existing, err := s.users.GetByOIDCSubject(issuer, claims.Subject)
 	if err == nil {
 		// Returning user — refresh profile from latest claims (best-effort).
+		// An empty email here means the IdP stopped releasing it; keep the
+		// stored one rather than overwriting a valid value with "".
 		email := normalizeEmail(claims.Email)
 		name := displayNameFromClaims(claims)
-		if email != existing.Email || name != existing.DisplayName {
+		if email != "" && (email != existing.Email || name != existing.DisplayName) {
 			if uerr := s.users.UpdateOIDCProfile(existing.ID, email, name); uerr != nil {
-				// Non-fatal: log-and-continue keeps login working if the
-				// profile refresh fails.
+				// Non-fatal: log and continue so a transient profile-refresh
+				// failure never blocks an otherwise-valid login.
+				slog.Warn("oidc: profile refresh failed", "user_id", existing.ID, "err", uerr)
 				return existing, nil
 			}
 			existing.Email = email
@@ -185,6 +194,15 @@ func (s *Server) findOrProvisionOIDCUser(claims *auth.OIDCClaims) (*models.User,
 		return nil, errOIDCProvisioningClosed
 	}
 
+	// A new account needs an email: users.email is NOT NULL UNIQUE and the
+	// issued JWT carries it. Provisioning with "" would let the first user in
+	// but collide every subsequent emailless user on the unique constraint.
+	// Require the IdP to release an email scope for first-login provisioning.
+	email := normalizeEmail(claims.Email)
+	if email == "" {
+		return nil, errOIDCNoEmail
+	}
+
 	count, err := s.users.Count()
 	if err != nil {
 		return nil, err
@@ -193,7 +211,6 @@ func (s *Server) findOrProvisionOIDCUser(claims *auth.OIDCClaims) (*models.User,
 		return nil, errOIDCUserLimit
 	}
 
-	email := normalizeEmail(claims.Email)
 	now := time.Now()
 	issuerCopy, subjectCopy := issuer, claims.Subject
 	user := &models.User{
@@ -222,11 +239,40 @@ func (s *Server) findOrProvisionOIDCUser(claims *auth.OIDCClaims) (*models.User,
 	return user, nil
 }
 
+// ssoErrorReasons is the closed set of reason codes redirectSSOError may emit.
+// Every reason the callback produces is a fixed internal string (never an
+// IdP-supplied value), so the login page can map each to a friendly message
+// and no externally-influenced data reaches the redirect URL.
+var ssoErrorReasons = map[string]bool{
+	"idp_error":             true,
+	"state_mismatch":        true,
+	"missing_nonce":         true,
+	"missing_pkce":          true,
+	"missing_code":          true,
+	"exchange_failed":       true,
+	"provisioning_disabled": true,
+	"user_limit":            true,
+	"no_email":              true,
+	"account_inactive":      true,
+	"login_failed":          true,
+}
+
 // redirectSSOError sends the browser back to the SPA login page with a stable
-// machine-readable reason code it can map to a friendly message.
+// machine-readable reason code it can map to a friendly message. The reason is
+// validated against a fixed allow-list and the URL is built with net/url, so
+// no caller mistake or IdP-supplied value can inject into the query string.
 func (s *Server) redirectSSOError(w http.ResponseWriter, r *http.Request, reason string) {
+	if !ssoErrorReasons[reason] {
+		reason = "login_failed"
+	}
 	base := strings.TrimRight(getBaseURL(), "/")
-	http.Redirect(w, r, base+"/login?sso_error="+reason, http.StatusFound)
+	u, err := url.Parse(base + "/login")
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+	u.RawQuery = url.Values{"sso_error": {reason}}.Encode()
+	http.Redirect(w, r, u.String(), http.StatusFound)
 }
 
 // setFlowCookie writes a short-lived httpOnly cookie for the OIDC flow.

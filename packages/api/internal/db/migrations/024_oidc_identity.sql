@@ -78,10 +78,8 @@ ALTER TABLE users_new RENAME TO users;
 CREATE UNIQUE INDEX idx_users_oidc ON users(oidc_issuer, oidc_subject);
 CREATE INDEX idx_users_email ON users(email);
 
--- Assert the rebuild orphaned no foreign key. A non-empty result set here
--- means a child row now points at a missing user — the migration must be
--- treated as failed. (foreign_key_check yields rows on violation; this
--- migration intends zero.)
-PRAGMA foreign_key_check;
-
+-- Re-enable enforcement. The migrator runs PRAGMA foreign_key_check after each
+-- migration and aborts if it returns any rows (see db.checkForeignKeys), so an
+-- orphaned FK from a bad rebuild fails the migration rather than leaving a
+-- corrupt schema. This rebuild intends zero violations.
 PRAGMA foreign_keys=ON;
